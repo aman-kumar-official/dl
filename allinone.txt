@@ -1,0 +1,2089 @@
+import pandas as pd
+import numpy as np
+
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.neural_network import MLPClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+train = pd.read_csv("/kaggle/input/competitions/outfit-prediction-c-1-fall-26-27/fashion_train.csv")
+test = pd.read_csv("/kaggle/input/competitions/outfit-prediction-c-1-fall-26-27/fashion_test.csv")
+
+X = train.drop(columns=["Id", "target"])
+y = train["target"]
+X_test = test.drop(columns=["Id"])
+
+X_train, X_valid, y_train, y_valid = train_test_split(
+    X,
+    y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+pipeline = Pipeline([
+    ("scaler", MinMaxScaler()),
+    ("mlp", MLPClassifier(
+        random_state=42,
+        early_stopping=True
+    ))
+])
+
+param_grid = {
+    "mlp__hidden_layer_sizes": [
+        (128,),
+        (256,),
+        (128, 64),
+        (256, 128)
+    ],
+    "mlp__activation": [
+        "relu",
+        "tanh"
+    ],
+    "mlp__alpha": [
+        0.0001,
+        0.001,
+        0.01
+    ],
+    "mlp__learning_rate_init": [
+        0.001,
+        0.0005
+    ],
+    "mlp__batch_size": [
+        64,
+        128
+    ],
+    "mlp__max_iter": [100]
+}
+
+grid = GridSearchCV(
+    pipeline,
+    param_grid,
+    cv=3,
+    scoring="accuracy",
+    n_jobs=-1,
+    verbose=2
+)
+
+grid.fit(X_train, y_train)
+
+print("Best Parameters:")
+print(grid.best_params_)
+
+print("Best CV Accuracy:")
+print(grid.best_score_)
+
+best_model = grid.best_estimator_
+
+pred = best_model.predict(X_valid)
+
+print("Validation Accuracy:", accuracy_score(y_valid, pred))
+print(classification_report(y_valid, pred))
+print(confusion_matrix(y_valid, pred))
+
+best_model.fit(X, y)
+
+test_pred = best_model.predict(X_test)
+
+submission = pd.DataFrame({
+    "Id": test["Id"],
+    "target": test_pred
+})
+
+submission.to_csv("submission.csv", index=False)
+
+print(submission.head())
+
+
+
+
+
+
+
+
+
+
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+
+for dirname, _, filenames in os.walk('/kaggle/input'):
+    for filename in filenames:
+        print(os.path.join(dirname, filename))
+
+train_df = pd.read_csv('/kaggle/input/datasets/amansingh45/diabetes/train.csv')
+test_df = pd.read_csv('/kaggle/input/datasets/amansingh45/diabetes/test.csv')
+
+X = train_df.drop(["id", "label"], axis=1).values
+y = train_df["label"].values
+
+X_test_final = test_df.drop("id", axis=1).values
+test_ids = test_df["id"]
+
+X_train, X_valid, y_train, y_valid = train_test_split(
+    X,
+    y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+scaler = StandardScaler()
+
+X_train = scaler.fit_transform(X_train)
+X_valid = scaler.transform(X_valid)
+X_test_final = scaler.transform(X_test_final)
+
+X_train = torch.FloatTensor(X_train)
+X_valid = torch.FloatTensor(X_valid)
+X_test_final = torch.FloatTensor(X_test_final)
+
+y_train = torch.FloatTensor(y_train).view(-1, 1)
+y_valid = torch.FloatTensor(y_valid).view(-1, 1)
+
+input_size = X_train.shape[1]
+
+hidden_sizes = [16, 32, 64]
+learning_rates = [0.01, 0.001]
+epochs = 100
+
+results = []
+
+def accuracy(pred, label):
+    pred = (pred >= 0.5).float()
+    return (pred == label).float().mean().item()
+
+for hidden in hidden_sizes:
+    for lr in learning_rates:
+        model = nn.Sequential(
+            nn.Linear(input_size, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden // 2),
+            nn.ReLU(),
+            nn.Linear(hidden // 2, 1),
+            nn.Sigmoid()
+        )
+
+        criterion = nn.BCELoss()
+        optimizer = optim.Adam(model.parameters(), lr=lr)
+
+        for epoch in range(epochs):
+            model.train()
+            optimizer.zero_grad()
+
+            outputs = model(X_train)
+            loss = criterion(outputs, y_train)
+
+            loss.backward()
+            optimizer.step()
+
+        model.eval()
+
+        with torch.no_grad():
+            train_pred = model(X_train)
+            valid_pred = model(X_valid)
+
+            train_acc = accuracy(train_pred, y_train)
+            valid_acc = accuracy(valid_pred, y_valid)
+
+        results.append({
+            "Hidden": hidden,
+            "LR": lr,
+            "TrainAcc": train_acc,
+            "TestAcc": valid_acc,
+            "Model": model
+        })
+
+        print(
+            f"Hidden={hidden} LR={lr} "
+            f"Train={train_acc:.4f} Test={valid_acc:.4f}"
+        )
+
+results_df = pd.DataFrame(results)
+
+print(results_df[["Hidden", "LR", "TrainAcc", "TestAcc"]])
+
+best = results_df.iloc[results_df["TestAcc"].idxmax()]
+
+print("\nBest Hyperparameters")
+print(best[["Hidden", "LR", "TrainAcc", "TestAcc"]])
+
+best_model = best["Model"]
+
+plt.figure(figsize=(8, 5))
+
+for lr in learning_rates:
+    temp = results_df[results_df["LR"] == lr]
+
+    plt.plot(
+        temp["Hidden"],
+        temp["TrainAcc"],
+        marker='o',
+        label=f"Train LR={lr}"
+    )
+
+    plt.plot(
+        temp["Hidden"],
+        temp["TestAcc"],
+        marker='s',
+        label=f"Test LR={lr}"
+    )
+
+plt.xlabel("Hidden Layer Size")
+plt.ylabel("Accuracy")
+plt.title("Accuracy vs Hidden Layer Size")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+plt.figure(figsize=(8, 5))
+
+for hidden in hidden_sizes:
+    temp = results_df[results_df["Hidden"] == hidden]
+
+    plt.plot(
+        temp["LR"],
+        temp["TrainAcc"],
+        marker='o',
+        label=f"Train Hidden={hidden}"
+    )
+
+    plt.plot(
+        temp["LR"],
+        temp["TestAcc"],
+        marker='s',
+        label=f"Test Hidden={hidden}"
+    )
+
+plt.xlabel("Learning Rate")
+plt.ylabel("Accuracy")
+plt.title("Accuracy vs Learning Rate")
+plt.xscale("log")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+best_model.eval()
+
+with torch.no_grad():
+    probs = best_model(X_test_final)
+
+predictions = (probs >= 0.5).int().numpy().flatten()
+
+submission = pd.DataFrame({
+    "id": test_ids,
+    "label": predictions
+})
+
+submission.to_csv("submission.csv", index=False)
+
+print("\nsubmission.csv generated successfully!")
+print(submission.head())
+
+
+
+
+
+
+
+
+
+import os
+import numpy as np
+import pandas as pd
+import kagglehub
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+
+
+for dirname, _, filenames in os.walk('/kaggle/input'):
+    for filename in filenames:
+        print(os.path.join(dirname, filename))
+
+
+class CrabDataset(Dataset):
+    def __init__(self, features, targets=None):
+        self.features = torch.tensor(features, dtype=torch.float32)
+        self.targets = (
+            torch.tensor(targets, dtype=torch.float32).unsqueeze(1)
+            if targets is not None else None
+        )
+
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, idx):
+        if self.targets is not None:
+            return self.features[idx], self.targets[idx]
+        return self.features[idx]
+
+
+class CrabAgeFFNN(nn.Module):
+    def __init__(self, input_dim):
+        super(CrabAgeFFNN, self).__init__()
+
+        self.linear1 = nn.Linear(input_dim, 128)
+        self.relu1 = nn.ReLU()
+
+        self.linear2 = nn.Linear(128, 64)
+        self.relu2 = nn.ReLU()
+
+        self.linear3 = nn.Linear(64, 32)
+        self.relu3 = nn.ReLU()
+
+        self.output_layer = nn.Linear(32, 1)
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.relu1(x)
+
+        x = self.linear2(x)
+        x = self.relu2(x)
+
+        x = self.linear3(x)
+        x = self.relu3(x)
+
+        x = self.output_layer(x)
+        return x
+
+
+def main():
+    train_df = pd.read_csv(
+        "/kaggle/input/datasets/amansingh45/crab-age/crab/train.csv"
+    )
+    test_df = pd.read_csv(
+        "/kaggle/input/datasets/amansingh45/crab-age/crab/test.csv"
+    )
+
+    test_ids = test_df['id']
+
+    y = train_df['Age'].values
+    X = train_df.drop(['id', 'Age'], axis=1)
+    X_test = test_df.drop(['id'], axis=1)
+
+    X = pd.get_dummies(X, columns=['Sex'], drop_first=True)
+    X_test = pd.get_dummies(X_test, columns=['Sex'], drop_first=True)
+
+    X, X_test = X.align(
+        X_test,
+        join='left',
+        axis=1,
+        fill_value=0
+    )
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    X_test_scaled = scaler.transform(X_test)
+
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_scaled,
+        y,
+        test_size=0.2,
+        random_state=42
+    )
+
+    train_dataset = CrabDataset(X_train, y_train)
+    val_dataset = CrabDataset(X_val, y_val)
+    test_dataset = CrabDataset(X_test_scaled)
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=64,
+        shuffle=True
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=64,
+        shuffle=False
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=64,
+        shuffle=False
+    )
+
+    input_dim = X_train.shape[1]
+    model = CrabAgeFFNN(input_dim)
+
+    criterion = nn.L1Loss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+    epochs = 100
+    best_val_loss = float('inf')
+
+    for epoch in range(epochs):
+        model.train()
+        train_loss = 0.0
+
+        for batch_X, batch_y in train_loader:
+            optimizer.zero_grad()
+
+            predictions = model(batch_X)
+            loss = criterion(predictions, batch_y)
+
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item() * batch_X.size(0)
+
+        train_loss /= len(train_loader.dataset)
+
+        model.eval()
+        val_loss = 0.0
+
+        with torch.no_grad():
+            for batch_X, batch_y in val_loader:
+                predictions = model(batch_X)
+                loss = criterion(predictions, batch_y)
+
+                val_loss += loss.item() * batch_X.size(0)
+
+        val_loss /= len(val_loader.dataset)
+
+        if (epoch + 1) % 10 == 0:
+            print(
+                f"Epoch {epoch+1}/{epochs} | "
+                f"Train MAE: {train_loss:.4f} | "
+                f"Val MAE: {val_loss:.4f}"
+            )
+
+    model.eval()
+    test_predictions = []
+
+    with torch.no_grad():
+        for batch_X in test_loader:
+            preds = model(batch_X)
+            test_predictions.extend(preds.numpy().flatten())
+
+    submission = pd.DataFrame({
+        'id': test_ids,
+        'Age': test_predictions
+    })
+
+    submission.to_csv("submission.csv", index=False)
+
+    print("Predictions saved to submission.csv")
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
+
+
+
+
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import tensorflow as tf
+
+from tensorflow.keras import layers, models
+from sklearn.model_selection import train_test_split
+
+print("TensorFlow version:", tf.__version__)
+
+for dirname, _, filenames in os.walk('/kaggle/input'):
+    print(dirname)
+    for filename in filenames[:5]:
+        print("   ", filename)
+
+DATA_DIR = "/kaggle/input/competitions/dog-breed-identification"
+
+labels_path = os.path.join(DATA_DIR, "labels.csv")
+labels = pd.read_csv(labels_path)
+
+print("Dataset shape:", labels.shape)
+print("\nFirst 5 rows:")
+display(labels.head())
+
+print("\nNumber of unique breeds:", labels["breed"].nunique())
+print("\nNumber of images:", len(labels))
+
+breed_counts = labels["breed"].value_counts()
+
+print("Number of breeds:", len(breed_counts))
+print("\nImages per breed:")
+display(breed_counts.head(10))
+
+print("\nMinimum images in a breed:", breed_counts.min())
+print("Maximum images in a breed:", breed_counts.max())
+
+breeds = sorted(labels["breed"].unique())
+breed_to_index = {breed: i for i, breed in enumerate(breeds)}
+labels["class"] = labels["breed"].map(breed_to_index)
+
+print("Number of classes:", len(breeds))
+print("\nFirst 10 class mappings:")
+
+for breed, index in list(breed_to_index.items())[:10]:
+    print(index, "->", breed)
+
+TRAIN_DIR = os.path.join(DATA_DIR, "train")
+TEST_DIR = os.path.join(DATA_DIR, "test")
+
+labels["image_path"] = labels["id"].apply(
+    lambda x: os.path.join(TRAIN_DIR, x + ".jpg")
+)
+
+print(labels[["id", "breed", "class", "image_path"]].head())
+print("First image exists:", os.path.exists(labels["image_path"].iloc[0]))
+
+plt.figure(figsize=(12, 8))
+
+for i in range(12):
+    img = tf.keras.utils.load_img(
+        labels["image_path"].iloc[i],
+        target_size=(160, 160)
+    )
+
+    plt.subplot(3, 4, i + 1)
+    plt.imshow(img)
+    plt.title(labels["breed"].iloc[i])
+    plt.axis("off")
+
+plt.tight_layout()
+plt.show()
+
+train_df, val_df = train_test_split(
+    labels,
+    test_size=0.20,
+    random_state=42,
+    stratify=labels["class"]
+)
+
+print("Training images:", len(train_df))
+print("Validation images:", len(val_df))
+print("\nTraining classes:", train_df["class"].nunique())
+print("Validation classes:", val_df["class"].nunique())
+
+IMG_SIZE = (160, 160)
+BATCH_SIZE = 32
+AUTOTUNE = tf.data.AUTOTUNE
+
+def load_image(path, label):
+    image = tf.io.read_file(path)
+    image = tf.image.decode_jpeg(image, channels=3)
+    image = tf.image.resize(image, IMG_SIZE)
+    image = tf.cast(image, tf.float32) / 255.0
+    return image, label
+
+train_ds = tf.data.Dataset.from_tensor_slices(
+    (
+        train_df["image_path"].values,
+        train_df["class"].values
+    )
+)
+
+val_ds = tf.data.Dataset.from_tensor_slices(
+    (
+        val_df["image_path"].values,
+        val_df["class"].values
+    )
+)
+
+train_ds = (
+    train_ds
+    .shuffle(2000)
+    .map(load_image, num_parallel_calls=AUTOTUNE)
+    .batch(BATCH_SIZE)
+    .prefetch(AUTOTUNE)
+)
+
+val_ds = (
+    val_ds
+    .map(load_image, num_parallel_calls=AUTOTUNE)
+    .batch(BATCH_SIZE)
+    .prefetch(AUTOTUNE)
+)
+
+print("Datasets created successfully.")
+
+data_augmentation = tf.keras.Sequential([
+    layers.RandomFlip("horizontal"),
+    layers.RandomRotation(0.10),
+    layers.RandomZoom(0.10),
+    layers.RandomContrast(0.10),
+], name="data_augmentation")
+
+NUM_CLASSES = 120
+
+model = models.Sequential([
+    layers.Input(shape=(160, 160, 3)),
+
+    data_augmentation,
+
+    layers.Conv2D(32, (3, 3), padding="same", activation="relu"),
+    layers.BatchNormalization(),
+
+    layers.Conv2D(32, (3, 3), padding="same", activation="relu"),
+    layers.BatchNormalization(),
+
+    layers.MaxPooling2D((2, 2)),
+    layers.Dropout(0.20),
+
+    layers.Conv2D(64, (3, 3), padding="same", activation="relu"),
+    layers.BatchNormalization(),
+
+    layers.Conv2D(64, (3, 3), padding="same", activation="relu"),
+    layers.BatchNormalization(),
+
+    layers.MaxPooling2D((2, 2)),
+    layers.Dropout(0.25),
+
+    layers.Conv2D(128, (3, 3), padding="same", activation="relu"),
+    layers.BatchNormalization(),
+
+    layers.Conv2D(128, (3, 3), padding="same", activation="relu"),
+    layers.BatchNormalization(),
+
+    layers.MaxPooling2D((2, 2)),
+    layers.Dropout(0.30),
+
+    layers.Conv2D(256, (3, 3), padding="same", activation="relu"),
+    layers.BatchNormalization(),
+
+    layers.Conv2D(256, (3, 3), padding="same", activation="relu"),
+    layers.BatchNormalization(),
+
+    layers.Dropout(0.35),
+
+    layers.GlobalMaxPooling2D(),
+
+    layers.Dense(256, activation="relu"),
+    layers.BatchNormalization(),
+    layers.Dropout(0.50),
+
+    layers.Dense(NUM_CLASSES, activation="softmax")
+])
+
+model.summary()
+
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+    loss="sparse_categorical_crossentropy",
+    metrics=["accuracy"]
+)
+
+early_stopping = tf.keras.callbacks.EarlyStopping(
+    monitor="val_loss",
+    patience=5,
+    restore_best_weights=True,
+    verbose=1
+)
+
+EPOCHS = 100
+
+history = model.fit(
+    train_ds,
+    validation_data=val_ds,
+    epochs=EPOCHS,
+    callbacks=[early_stopping]
+)
+
+plt.figure(figsize=(12, 5))
+
+plt.subplot(1, 2, 1)
+plt.plot(history.history["accuracy"], label="Training Accuracy")
+plt.plot(history.history["val_accuracy"], label="Validation Accuracy")
+plt.xlabel("Epoch")
+plt.ylabel("Accuracy")
+plt.title("Training vs Validation Accuracy")
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(history.history["loss"], label="Training Loss")
+plt.plot(history.history["val_loss"], label="Validation Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.title("Training vs Validation Loss")
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+sample_submission_path = os.path.join(
+    DATA_DIR,
+    "sample_submission.csv"
+)
+
+sample_submission = pd.read_csv(sample_submission_path)
+
+print("Sample submission shape:", sample_submission.shape)
+print("\nColumns:")
+print(sample_submission.columns.tolist()[:10])
+print("...")
+
+test_ids = sample_submission["id"].values
+
+test_paths = [
+    os.path.join(TEST_DIR, image_id + ".jpg")
+    for image_id in test_ids
+]
+
+test_ds = tf.data.Dataset.from_tensor_slices(test_paths)
+
+def load_test_image(path):
+    image = tf.io.read_file(path)
+    image = tf.image.decode_jpeg(image, channels=3)
+    image = tf.image.resize(image, IMG_SIZE)
+    image = tf.cast(image, tf.float32) / 255.0
+    return image
+
+test_ds = (
+    test_ds
+    .map(load_test_image, num_parallel_calls=AUTOTUNE)
+    .batch(BATCH_SIZE)
+    .prefetch(AUTOTUNE)
+)
+
+print("Test images:", len(test_ids))
+
+predictions = model.predict(test_ds, verbose=1)
+
+print("Prediction shape:", predictions.shape)
+
+submission = pd.DataFrame(
+    predictions,
+    columns=sample_submission.columns[1:]
+)
+
+submission.insert(
+    0,
+    "id",
+    sample_submission["id"]
+)
+
+submission_path = "/kaggle/working/submission.csv"
+
+submission.to_csv(submission_path, index=False)
+
+print("Submission file created!")
+print("Location:", submission_path)
+print("Shape:", submission.shape)
+
+display(submission.head())
+
+print("File exists:", os.path.exists("/kaggle/working/submission.csv"))
+
+print("\nSubmission shape:")
+print(submission.shape)
+
+print("\nFirst 5 rows:")
+display(submission.head())
+
+print("\nChecking for missing values:")
+print(submission.isnull().sum().sum())
+
+print("\nChecking prediction probabilities:")
+print(submission.iloc[:, 1:].sum(axis=1).head())
+
+
+
+
+
+
+
+
+
+import os
+import shutil
+import random
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import tensorflow as tf
+
+from tensorflow.keras import layers, models
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score
+)
+
+print("TensorFlow version:", tf.__version__)
+print("GPU available:", tf.config.list_physical_devices('GPU'))
+
+DATASET_PATH = "/kaggle/input/datasets/drgfreeman/rockpaperscissors"
+
+print(os.listdir(DATASET_PATH))
+
+classes = ["paper", "rock", "scissors"]
+
+for class_name in classes:
+    class_path = os.path.join(DATASET_PATH, class_name)
+    images = os.listdir(class_path)
+    print(f"{class_name}: {len(images)} images")
+
+SOURCE_DIR = "/kaggle/input/datasets/drgfreeman/rockpaperscissors"
+SPLIT_DIR = "/kaggle/working/rockpaperscissors_split"
+
+print("Source folders:")
+print(os.listdir(SOURCE_DIR))
+
+for split in ["train", "validation", "test"]:
+    for class_name in classes:
+        os.makedirs(
+            os.path.join(SPLIT_DIR, split, class_name),
+            exist_ok=True
+        )
+
+random.seed(42)
+
+for class_name in classes:
+    source_class_dir = os.path.join(SOURCE_DIR, class_name)
+
+    image_files = [
+        f for f in os.listdir(source_class_dir)
+        if f.lower().endswith((".png", ".jpg", ".jpeg"))
+    ]
+
+    random.shuffle(image_files)
+
+    total = len(image_files)
+    train_end = int(total * 0.70)
+    val_end = int(total * 0.85)
+
+    train_files = image_files[:train_end]
+    val_files = image_files[train_end:val_end]
+    test_files = image_files[val_end:]
+
+    for file in train_files:
+        shutil.copy(
+            os.path.join(source_class_dir, file),
+            os.path.join(SPLIT_DIR, "train", class_name, file)
+        )
+
+    for file in val_files:
+        shutil.copy(
+            os.path.join(source_class_dir, file),
+            os.path.join(SPLIT_DIR, "validation", class_name, file)
+        )
+
+    for file in test_files:
+        shutil.copy(
+            os.path.join(source_class_dir, file),
+            os.path.join(SPLIT_DIR, "test", class_name, file)
+        )
+
+    print(
+        f"{class_name}: Train = {len(train_files)}, "
+        f"Validation = {len(val_files)}, "
+        f"Test = {len(test_files)}"
+    )
+
+TRAIN_DIR = os.path.join(SPLIT_DIR, "train")
+VAL_DIR = os.path.join(SPLIT_DIR, "validation")
+TEST_DIR = os.path.join(SPLIT_DIR, "test")
+
+print("TRAIN_DIR:", TRAIN_DIR)
+print("VAL_DIR:", VAL_DIR)
+print("TEST_DIR:", TEST_DIR)
+
+print("Classes:", os.listdir(TRAIN_DIR))
+
+for class_name in os.listdir(TRAIN_DIR):
+    class_path = os.path.join(TRAIN_DIR, class_name)
+    print(class_name, len(os.listdir(class_path)))
+
+IMG_SIZE = (224, 224)
+BATCH_SIZE = 32
+SEED = 42
+
+train_ds = tf.keras.utils.image_dataset_from_directory(
+    TRAIN_DIR,
+    image_size=IMG_SIZE,
+    batch_size=BATCH_SIZE,
+    shuffle=True,
+    seed=SEED
+)
+
+val_ds = tf.keras.utils.image_dataset_from_directory(
+    VAL_DIR,
+    image_size=IMG_SIZE,
+    batch_size=BATCH_SIZE,
+    shuffle=False
+)
+
+test_ds = tf.keras.utils.image_dataset_from_directory(
+    TEST_DIR,
+    image_size=IMG_SIZE,
+    batch_size=BATCH_SIZE,
+    shuffle=False
+)
+
+class_names = train_ds.class_names
+num_classes = len(class_names)
+
+print("Classes:", class_names)
+print("Number of classes:", num_classes)
+
+plt.figure(figsize=(10, 10))
+
+for images, labels in train_ds.take(1):
+    for i in range(9):
+        ax = plt.subplot(3, 3, i + 1)
+        plt.imshow(images[i].numpy().astype("uint8"))
+        plt.title(class_names[labels[i]])
+        plt.axis("off")
+
+plt.tight_layout()
+plt.show()
+
+data_augmentation = tf.keras.Sequential([
+    layers.RandomFlip("horizontal"),
+    layers.RandomRotation(0.15),
+    layers.RandomZoom(0.15),
+    layers.RandomTranslation(0.1, 0.1)
+], name="data_augmentation")
+
+plt.figure(figsize=(10, 10))
+
+for images, labels in train_ds.take(1):
+    first_image = images[0]
+
+    for i in range(9):
+        ax = plt.subplot(3, 3, i + 1)
+
+        augmented_image = data_augmentation(
+            tf.expand_dims(first_image, 0),
+            training=True
+        )
+
+        plt.imshow(augmented_image[0].numpy().astype("uint8"))
+        plt.axis("off")
+
+plt.tight_layout()
+plt.show()
+
+AUTOTUNE = tf.data.AUTOTUNE
+
+train_ds = train_ds.prefetch(buffer_size=AUTOTUNE)
+val_ds = val_ds.prefetch(buffer_size=AUTOTUNE)
+test_ds = test_ds.prefetch(buffer_size=AUTOTUNE)
+
+base_model = MobileNetV2(
+    input_shape=(224, 224, 3),
+    include_top=False,
+    weights="imagenet"
+)
+
+base_model.trainable = False
+
+inputs = layers.Input(shape=(224, 224, 3))
+
+x = data_augmentation(inputs)
+x = preprocess_input(x)
+x = base_model(x, training=False)
+x = layers.GlobalAveragePooling2D()(x)
+x = layers.BatchNormalization()(x)
+x = layers.Dense(128, activation="relu")(x)
+x = layers.BatchNormalization()(x)
+x = layers.Dropout(0.5)(x)
+
+outputs = layers.Dense(
+    num_classes,
+    activation="softmax"
+)(x)
+
+model = tf.keras.Model(inputs, outputs)
+
+model.summary()
+
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
+    loss="sparse_categorical_crossentropy",
+    metrics=["accuracy"]
+)
+
+early_stopping = tf.keras.callbacks.EarlyStopping(
+    monitor="val_loss",
+    patience=5,
+    restore_best_weights=True,
+    verbose=1
+)
+
+reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
+    monitor="val_loss",
+    factor=0.2,
+    patience=2,
+    min_lr=1e-7,
+    verbose=1
+)
+
+checkpoint = tf.keras.callbacks.ModelCheckpoint(
+    "/kaggle/working/best_model.keras",
+    monitor="val_accuracy",
+    save_best_only=True,
+    verbose=1
+)
+
+INITIAL_EPOCHS = 15
+
+history = model.fit(
+    train_ds,
+    validation_data=val_ds,
+    epochs=INITIAL_EPOCHS,
+    callbacks=[
+        early_stopping,
+        reduce_lr,
+        checkpoint
+    ]
+)
+
+plt.figure(figsize=(8, 5))
+
+plt.plot(
+    history.history["accuracy"],
+    label="Training Accuracy"
+)
+
+plt.plot(
+    history.history["val_accuracy"],
+    label="Validation Accuracy"
+)
+
+plt.title("Training vs Validation Accuracy")
+plt.xlabel("Epoch")
+plt.ylabel("Accuracy")
+plt.legend()
+plt.grid()
+plt.show()
+
+plt.figure(figsize=(8, 5))
+
+plt.plot(
+    history.history["loss"],
+    label="Training Loss"
+)
+
+plt.plot(
+    history.history["val_loss"],
+    label="Validation Loss"
+)
+
+plt.title("Training vs Validation Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.legend()
+plt.grid()
+plt.show()
+
+base_model.trainable = True
+
+for layer in base_model.layers[:-30]:
+    layer.trainable = False
+
+for layer in base_model.layers:
+    if isinstance(layer, layers.BatchNormalization):
+        layer.trainable = False
+
+trainable_layers = sum(
+    layer.trainable for layer in base_model.layers
+)
+
+print("Trainable base-model layers:", trainable_layers)
+
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5),
+    loss="sparse_categorical_crossentropy",
+    metrics=["accuracy"]
+)
+
+FINE_TUNE_EPOCHS = 15
+total_epochs = INITIAL_EPOCHS + FINE_TUNE_EPOCHS
+
+history_fine = model.fit(
+    train_ds,
+    validation_data=val_ds,
+    epochs=total_epochs,
+    initial_epoch=len(history.history["loss"]),
+    callbacks=[
+        early_stopping,
+        reduce_lr,
+        checkpoint
+    ]
+)
+
+acc = history.history["accuracy"] + history_fine.history["accuracy"]
+val_acc = history.history["val_accuracy"] + history_fine.history["val_accuracy"]
+
+loss = history.history["loss"] + history_fine.history["loss"]
+val_loss = history.history["val_loss"] + history_fine.history["val_loss"]
+
+plt.figure(figsize=(10, 5))
+
+plt.plot(acc, label="Training Accuracy")
+plt.plot(val_acc, label="Validation Accuracy")
+
+plt.axvline(
+    x=len(history.history["accuracy"]) - 1,
+    linestyle="--",
+    label="Fine-tuning starts"
+)
+
+plt.title("Training and Validation Accuracy")
+plt.xlabel("Epoch")
+plt.ylabel("Accuracy")
+plt.legend()
+plt.grid()
+plt.show()
+
+plt.figure(figsize=(10, 5))
+
+plt.plot(loss, label="Training Loss")
+plt.plot(val_loss, label="Validation Loss")
+
+plt.axvline(
+    x=len(history.history["loss"]) - 1,
+    linestyle="--",
+    label="Fine-tuning starts"
+)
+
+plt.title("Training and Validation Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.legend()
+plt.grid()
+plt.show()
+
+test_loss, test_accuracy = model.evaluate(test_ds)
+
+print("Test Loss:", test_loss)
+print("Test Accuracy:", test_accuracy)
+
+y_true = []
+y_pred = []
+
+for images, labels in test_ds:
+    predictions = model.predict(images, verbose=0)
+
+    predicted_classes = np.argmax(predictions, axis=1)
+
+    y_true.extend(labels.numpy())
+    y_pred.extend(predicted_classes)
+
+y_true = np.array(y_true)
+y_pred = np.array(y_pred)
+
+accuracy = accuracy_score(y_true, y_pred)
+
+precision = precision_score(
+    y_true,
+    y_pred,
+    average="weighted"
+)
+
+recall = recall_score(
+    y_true,
+    y_pred,
+    average="weighted"
+)
+
+f1 = f1_score(
+    y_true,
+    y_pred,
+    average="weighted"
+)
+
+print("Accuracy :", accuracy)
+print("Precision:", precision)
+print("Recall   :", recall)
+print("F1 Score :", f1)
+
+print(
+    classification_report(
+        y_true,
+        y_pred,
+        target_names=class_names
+    )
+)
+
+cm = confusion_matrix(y_true, y_pred)
+
+plt.figure(figsize=(7, 6))
+
+sns.heatmap(
+    cm,
+    annot=True,
+    fmt="d",
+    xticklabels=class_names,
+    yticklabels=class_names
+)
+
+plt.xlabel("Predicted Label")
+plt.ylabel("True Label")
+plt.title("Confusion Matrix")
+plt.show()
+
+plt.figure(figsize=(12, 12))
+
+for images, labels in test_ds.take(1):
+    predictions = model.predict(images, verbose=0)
+    predicted_classes = np.argmax(predictions, axis=1)
+
+    for i in range(min(9, len(images))):
+        ax = plt.subplot(3, 3, i + 1)
+
+        plt.imshow(images[i].numpy().astype("uint8"))
+
+        true_label = class_names[labels[i]]
+        predicted_label = class_names[predicted_classes[i]]
+
+        title = f"True: {true_label}\nPred: {predicted_label}"
+
+        plt.title(title)
+        plt.axis("off")
+
+plt.tight_layout()
+plt.show()
+
+model.save(
+    "/kaggle/working/rock_paper_scissors_mobilenetv2.keras"
+)
+
+print("Model saved successfully.")
+
+prediction_df = pd.DataFrame({
+    "true_label": [class_names[i] for i in y_true],
+    "predicted_label": [class_names[i] for i in y_pred]
+})
+
+prediction_df.to_csv(
+    "/kaggle/working/rock_paper_scissors_predictions.csv",
+    index=False
+)
+
+display(prediction_df.head())
+
+metrics_df = pd.DataFrame({
+    "Metric": [
+        "Accuracy",
+        "Precision",
+        "Recall",
+        "F1 Score"
+    ],
+    "Score": [
+        accuracy,
+        precision,
+        recall,
+        f1
+    ]
+})
+
+metrics_df.to_csv(
+    "/kaggle/working/model_metrics.csv",
+    index=False
+)
+
+display(metrics_df)
+
+
+
+
+
+
+
+
+
+import os
+import glob
+import random
+import shutil
+import yaml
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import cv2
+
+from PIL import Image
+from tqdm.auto import tqdm
+
+import torch
+import ultralytics
+from ultralytics import YOLO
+from IPython.display import Image as DisplayImage, display
+
+print("PyTorch version:", torch.__version__)
+print("Ultralytics version:", ultralytics.__version__)
+print("CUDA available:", torch.cuda.is_available())
+
+if torch.cuda.is_available():
+    print("GPU:", torch.cuda.get_device_name(0))
+else:
+    print("Running on CPU")
+
+DATASET_DIR = Path("/kaggle/input/datasets")
+
+print("Dataset location:", DATASET_DIR)
+
+for root, dirs, files in os.walk(DATASET_DIR):
+    level = root.replace(str(DATASET_DIR), "").count(os.sep)
+
+    if level > 3:
+        continue
+
+    indent = "    " * level
+    print(f"{indent}{os.path.basename(root)}/")
+
+    for file in files[:20]:
+        print(f"{indent}    {file}")
+
+DATASET_ROOT = Path(
+    "/kaggle/input/datasets/gbiamgaurav/racoon-object-detection"
+)
+DATA_YAML = DATASET_ROOT / "data.yaml"
+
+print("\nDataset root:", DATASET_ROOT)
+
+for item in DATASET_ROOT.iterdir():
+    print(item)
+
+with open(DATA_YAML, "r") as f:
+    print("\ndata.yaml contents:")
+    print(f.read())
+
+for split in ["train", "valid", "test"]:
+    split_dir = DATASET_ROOT / split
+
+    print("\n" + "=" * 60)
+    print(split.upper())
+    print("=" * 60)
+
+    if not split_dir.exists():
+        print("Directory not found!")
+        continue
+
+    for item in split_dir.iterdir():
+        print(item.name)
+
+    images = (
+        list(split_dir.rglob("*.jpg"))
+        + list(split_dir.rglob("*.jpeg"))
+        + list(split_dir.rglob("*.png"))
+    )
+
+    labels = list(split_dir.rglob("*.txt"))
+
+    print("Images:", len(images))
+    print("Labels:", len(labels))
+
+with open(DATA_YAML, "r") as f:
+    data = yaml.safe_load(f)
+
+print("\nDATASET CONFIGURATION")
+print("=" * 60)
+
+for key, value in data.items():
+    print(f"{key}: {value}")
+
+TRAIN_IMAGES = DATASET_ROOT / "train" / "images"
+TRAIN_LABELS = DATASET_ROOT / "train" / "labels"
+
+image_files = list(TRAIN_IMAGES.glob("*"))
+
+random.seed(42)
+selected_images = random.sample(
+    image_files,
+    min(6, len(image_files))
+)
+
+fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+axes = axes.flatten()
+
+for ax, image_path in zip(axes, selected_images):
+    image = cv2.imread(str(image_path))
+
+    if image is None:
+        ax.axis("off")
+        continue
+
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    h, w = image.shape[:2]
+
+    label_path = TRAIN_LABELS / f"{image_path.stem}.txt"
+
+    if label_path.exists():
+        with open(label_path, "r") as f:
+            lines = f.readlines()
+
+        for line in lines:
+            values = line.strip().split()
+
+            if len(values) != 5:
+                continue
+
+            class_id, x_center, y_center, box_width, box_height = map(
+                float, values
+            )
+
+            x_center *= w
+            y_center *= h
+            box_width *= w
+            box_height *= h
+
+            x1 = int(x_center - box_width / 2)
+            y1 = int(y_center - box_height / 2)
+            x2 = int(x_center + box_width / 2)
+            y2 = int(y_center + box_height / 2)
+
+            cv2.rectangle(
+                image,
+                (x1, y1),
+                (x2, y2),
+                (255, 0, 0),
+                3
+            )
+
+            cv2.putText(
+                image,
+                "raccoon",
+                (x1, max(y1 - 10, 20)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 0, 0),
+                2
+            )
+
+    ax.imshow(image)
+    ax.set_title(image_path.name)
+    ax.axis("off")
+
+for ax in axes[len(selected_images):]:
+    ax.axis("off")
+
+plt.tight_layout()
+plt.show()
+
+model = YOLO("yolov8n.pt")
+
+print("Pretrained YOLO model loaded successfully.")
+
+results = model.train(
+    data=str(DATA_YAML),
+    epochs=100,
+    imgsz=640,
+    batch=16,
+    pretrained=True,
+    optimizer="auto",
+    dropout=0.10,
+    patience=15,
+    seed=42,
+    device=0,
+    project="/kaggle/working/raccoon_detection",
+    name="yolov8s_raccoon",
+    plots=True,
+    verbose=True
+)
+
+BEST_MODEL = (
+    "/kaggle/working/raccoon_detection/"
+    "yolov8s_raccoon/weights/best.pt"
+)
+
+best_model = YOLO(BEST_MODEL)
+
+print("Best model loaded successfully.")
+print("Model:", BEST_MODEL)
+
+test_results = best_model.val(
+    data=str(DATA_YAML),
+    split="test",
+    imgsz=640,
+    batch=16,
+    device=0,
+    plots=True,
+    verbose=True
+)
+
+print("=" * 60)
+print("TEST SET PERFORMANCE")
+print("=" * 60)
+
+print(f"Overall Precision : {test_results.box.mp:.4f}")
+print(f"Overall Recall    : {test_results.box.mr:.4f}")
+print(f"Overall mAP@50    : {test_results.box.map50:.4f}")
+print(f"Overall mAP@50:95 : {test_results.box.map:.4f}")
+
+class_names = ["Cat", "Dog", "Human", "Possum", "racoon"]
+
+print("\nPer-class TEST results:")
+print("-" * 75)
+
+for i, name in enumerate(class_names):
+    if i < len(test_results.box.p):
+        print(
+            f"{name:10s} | "
+            f"Precision: {test_results.box.p[i]:.4f} | "
+            f"Recall: {test_results.box.r[i]:.4f} | "
+            f"mAP50: {test_results.box.ap50[i]:.4f} | "
+            f"mAP50-95: {test_results.box.ap[i]:.4f}"
+        )
+
+RUN_DIR = Path(
+    "/kaggle/working/raccoon_detection/yolov8s_raccoon"
+)
+
+confusion_matrix_path = RUN_DIR / "confusion_matrix.png"
+
+if confusion_matrix_path.exists():
+    display(DisplayImage(filename=str(confusion_matrix_path)))
+else:
+    print("Confusion matrix not found in:", RUN_DIR)
+
+results_plot = RUN_DIR / "results.png"
+
+if results_plot.exists():
+    display(DisplayImage(filename=str(results_plot)))
+else:
+    print("Training results plot not found.")
+
+TEST_IMAGES = DATASET_ROOT / "test" / "images"
+
+prediction_results = best_model.predict(
+    source=str(TEST_IMAGES),
+    imgsz=640,
+    conf=0.25,
+    device=0,
+    save=True,
+    project="/kaggle/working/raccoon_detection",
+    name="test_predictions",
+    verbose=False
+)
+
+print("Predictions generated.")
+print("/kaggle/working/raccoon_detection/test_predictions")
+
+prediction_files = glob.glob(
+    "/kaggle/working/raccoon_detection/test_predictions/*"
+)
+
+print("Number of prediction images:", len(prediction_files))
+
+for file in prediction_files[:6]:
+    print(file)
+    display(DisplayImage(filename=file))
+
+total_detections = 0
+raccoon_detections = 0
+
+print("=" * 70)
+print("TEST PREDICTION SUMMARY")
+print("=" * 70)
+
+for result in prediction_results:
+    image_name = Path(result.path).name
+
+    if result.boxes is None:
+        print(f"{image_name}: No detections")
+        continue
+
+    classes = result.boxes.cls.cpu().numpy()
+    confidences = result.boxes.conf.cpu().numpy()
+
+    total = len(classes)
+    total_detections += total
+
+    names = [
+        best_model.names[int(c)]
+        for c in classes
+    ]
+
+    raccoon_count = sum(
+        1 for name in names
+        if name.lower() == "racoon"
+    )
+
+    raccoon_detections += raccoon_count
+
+    print(
+        f"{image_name:45s} "
+        f"Detections: {total:2d} | "
+        f"Racoon: {raccoon_count:2d}"
+    )
+
+print("\n" + "=" * 70)
+print("Total detections       :", total_detections)
+print("Total racoon detections:", raccoon_detections)
+
+source_model = Path(
+    "/kaggle/working/raccoon_detection/"
+    "yolov8s_raccoon/weights/best.pt"
+)
+
+destination_model = Path(
+    "/kaggle/working/raccoon_yolov8_best.pt"
+)
+
+shutil.copy2(source_model, destination_model)
+
+print("\nFinal model saved:")
+print(destination_model)
+print(
+    f"Size: {destination_model.stat().st_size / (1024**2):.2f} MB"
+)
+
+
+
+
+
+
+
+
+
+import os
+import urllib.request
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
+import math
+import json
+from torch.utils.data import Dataset, DataLoader
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Device:", device)
+
+if torch.cuda.is_available():
+    print("GPU:", torch.cuda.get_device_name(0))
+
+url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+dataset_path = "/kaggle/working/shakespeare.txt"
+urllib.request.urlretrieve(url, dataset_path)
+
+print("Dataset downloaded successfully!")
+print("Location:", dataset_path)
+
+with open(dataset_path, "r", encoding="utf-8") as f:
+    text = f.read()
+
+print("Total number of characters:", len(text))
+print("\nFirst 1000 characters:\n")
+print(text[:1000])
+
+print("Total characters:", len(text))
+print("Number of unique characters:", len(set(text)))
+print("\nUnique characters:")
+print(sorted(set(text)))
+
+chars = sorted(list(set(text)))
+vocab_size = len(chars)
+
+print("Vocabulary size:", vocab_size)
+
+char_to_idx = {char: idx for idx, char in enumerate(chars)}
+idx_to_char = {idx: char for idx, char in enumerate(chars)}
+
+print("\nCharacter to index:")
+print(list(char_to_idx.items())[:20])
+
+encoded_text = np.array(
+    [char_to_idx[c] for c in text],
+    dtype=np.int64
+)
+
+print("Encoded shape:", encoded_text.shape)
+print("\nFirst 50 encoded characters:")
+print(encoded_text[:50])
+
+split_index = int(0.9 * len(encoded_text))
+train_data = encoded_text[:split_index]
+val_data = encoded_text[split_index:]
+
+print("Training characters:", len(train_data))
+print("Validation characters:", len(val_data))
+
+
+class ShakespeareDataset(Dataset):
+    def __init__(self, data, seq_length=100):
+        self.data = torch.tensor(data, dtype=torch.long)
+        self.seq_length = seq_length
+
+    def __len__(self):
+        return len(self.data) - self.seq_length
+
+    def __getitem__(self, index):
+        x = self.data[index:index + self.seq_length]
+        y = self.data[index + 1:index + self.seq_length + 1]
+        return x, y
+
+
+SEQ_LENGTH = 100
+BATCH_SIZE = 128
+
+train_dataset = ShakespeareDataset(train_data, seq_length=SEQ_LENGTH)
+val_dataset = ShakespeareDataset(val_data, seq_length=SEQ_LENGTH)
+
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=BATCH_SIZE,
+    shuffle=True,
+    drop_last=True
+)
+
+val_loader = DataLoader(
+    val_dataset,
+    batch_size=BATCH_SIZE,
+    shuffle=False,
+    drop_last=True
+)
+
+print("Training batches:", len(train_loader))
+print("Validation batches:", len(val_loader))
+
+x_batch, y_batch = next(iter(train_loader))
+
+print("Input shape:", x_batch.shape)
+print("Target shape:", y_batch.shape)
+
+print("\nFirst input sequence:")
+print("".join(idx_to_char[int(i)] for i in x_batch[0]))
+
+print("\nCorresponding target:")
+print("".join(idx_to_char[int(i)] for i in y_batch[0]))
+
+
+class CharLSTM(nn.Module):
+    def __init__(
+        self,
+        vocab_size,
+        embedding_dim=128,
+        hidden_dim=256,
+        num_layers=1,
+        dropout=0.0
+    ):
+        super(CharLSTM, self).__init__()
+
+        self.embedding = nn.Embedding(vocab_size, embedding_dim)
+
+        self.lstm = nn.LSTM(
+            input_size=embedding_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0
+        )
+
+        self.fc = nn.Linear(hidden_dim, vocab_size)
+
+    def forward(self, x, hidden=None):
+        x = self.embedding(x)
+        output, hidden = self.lstm(x, hidden)
+        output = self.fc(output)
+        return output, hidden
+
+
+EMBEDDING_DIM = 128
+HIDDEN_DIM = 256
+
+model = CharLSTM(
+    vocab_size=vocab_size,
+    embedding_dim=EMBEDDING_DIM,
+    hidden_dim=HIDDEN_DIM
+)
+
+model = model.to(device)
+print(model)
+
+total_params = sum(p.numel() for p in model.parameters())
+trainable_params = sum(
+    p.numel() for p in model.parameters() if p.requires_grad
+)
+
+print("Total parameters:", total_params)
+print("Trainable parameters:", trainable_params)
+
+criterion = nn.CrossEntropyLoss()
+
+optimizer = torch.optim.Adam(
+    model.parameters(),
+    lr=0.002
+)
+
+print("Loss function:", criterion)
+print("Optimizer:", optimizer)
+
+
+def train_one_epoch(model, loader, criterion, optimizer, device):
+    model.train()
+    total_loss = 0
+
+    for x, y in loader:
+        x = x.to(device)
+        y = y.to(device)
+
+        optimizer.zero_grad()
+        output, _ = model(x)
+
+        loss = criterion(
+            output.reshape(-1, output.size(-1)),
+            y.reshape(-1)
+        )
+
+        loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(
+            model.parameters(),
+            max_norm=5
+        )
+
+        optimizer.step()
+        total_loss += loss.item()
+
+    return total_loss / len(loader)
+
+
+def validate(model, loader, criterion, device):
+    model.eval()
+    total_loss = 0
+
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(device)
+            y = y.to(device)
+
+            output, _ = model(x)
+
+            loss = criterion(
+                output.reshape(-1, output.size(-1)),
+                y.reshape(-1)
+            )
+
+            total_loss += loss.item()
+
+    return total_loss / len(loader)
+
+
+EPOCHS = 10
+train_losses = []
+val_losses = []
+best_val_loss = float("inf")
+
+for epoch in range(EPOCHS):
+    train_loss = train_one_epoch(
+        model, train_loader, criterion, optimizer, device
+    )
+
+    val_loss = validate(
+        model, val_loader, criterion, device
+    )
+
+    train_losses.append(train_loss)
+    val_losses.append(val_loss)
+
+    print(
+        f"Epoch [{epoch + 1}/{EPOCHS}] "
+        f"Train Loss: {train_loss:.4f} "
+        f"Val Loss: {val_loss:.4f}"
+    )
+
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+
+        torch.save(
+            model.state_dict(),
+            "/kaggle/working/best_char_lstm.pth"
+        )
+
+        print("Best model saved!")
+
+
+plt.figure(figsize=(10, 5))
+plt.plot(train_losses, label="Training Loss")
+plt.plot(val_losses, label="Validation Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Cross Entropy Loss")
+plt.title("Training and Validation Loss")
+plt.legend()
+plt.grid()
+plt.show()
+
+train_perplexity = math.exp(train_losses[-1])
+val_perplexity = math.exp(val_losses[-1])
+
+print("Final Training Loss:", train_losses[-1])
+print("Final Validation Loss:", val_losses[-1])
+print("Training Perplexity:", train_perplexity)
+print("Validation Perplexity:", val_perplexity)
+
+model.load_state_dict(
+    torch.load(
+        "/kaggle/working/best_char_lstm.pth",
+        map_location=device
+    )
+)
+
+model.eval()
+print("Best model loaded successfully.")
+
+
+def generate_text(model, start_string, length=200, temperature=0.8):
+    if temperature <= 0:
+        raise ValueError("Temperature must be greater than zero.")
+
+    model.eval()
+
+    for char in start_string:
+        if char not in char_to_idx:
+            raise ValueError(
+                f"Character {repr(char)} is not present in the vocabulary."
+            )
+
+    input_indices = [char_to_idx[c] for c in start_string]
+
+    input_tensor = torch.tensor(
+        [input_indices],
+        dtype=torch.long
+    ).to(device)
+
+    generated_text = start_string
+    hidden = None
+
+    with torch.no_grad():
+        output, hidden = model(input_tensor, hidden)
+        last_input = input_tensor[:, -1:]
+
+        for _ in range(length):
+            output, hidden = model(last_input, hidden)
+            logits = output[:, -1, :]
+            logits = logits / temperature
+
+            probabilities = torch.softmax(logits, dim=-1)
+
+            next_index = torch.multinomial(
+                probabilities,
+                num_samples=1
+            )
+
+            next_char = idx_to_char[next_index.item()]
+            generated_text += next_char
+            last_input = next_index
+
+    return generated_text
+
+
+generated = generate_text(
+    model,
+    start_string="ROMEO",
+    length=300,
+    temperature=0.8
+)
+
+print(generated)
+
+start_words = ["ROMEO", "JULIET", "KING", "What", "The"]
+
+for word in start_words:
+    print("=" * 80)
+    print("START:", word)
+    print()
+
+    generated = generate_text(
+        model,
+        start_string=word,
+        length=200,
+        temperature=0.8
+    )
+
+    print(generated)
+    print()
+
+temperatures = [0.3, 0.7, 1.0, 1.3]
+
+for temp in temperatures:
+    print("=" * 80)
+    print("Temperature:", temp)
+    print()
+
+    generated = generate_text(
+        model,
+        start_string="ROMEO",
+        length=250,
+        temperature=temp
+    )
+
+    print(generated)
+
+
+with open(
+    "/kaggle/working/char_to_idx.json",
+    "w",
+    encoding="utf-8"
+) as f:
+    json.dump(char_to_idx, f, ensure_ascii=False)
+
+with open(
+    "/kaggle/working/idx_to_char.json",
+    "w",
+    encoding="utf-8"
+) as f:
+    json.dump(
+        {str(k): v for k, v in idx_to_char.items()},
+        f,
+        ensure_ascii=False
+    )
+
+print("Vocabulary files saved.")
+
+checkpoint = {
+    "model_state_dict": model.state_dict(),
+    "vocab_size": vocab_size,
+    "embedding_dim": EMBEDDING_DIM,
+    "hidden_dim": HIDDEN_DIM,
+    "char_to_idx": char_to_idx,
+    "idx_to_char": idx_to_char
+}
+
+torch.save(
+    checkpoint,
+    "/kaggle/working/shakespeare_lstm_checkpoint.pth"
+)
+
+print("Complete checkpoint saved!")
+
+print("=" * 60)
+print("TEXT GENERATION USING LSTM")
+print("=" * 60)
+print("Dataset: Tiny Shakespeare")
+print("Task: Character-level text generation")
+print("Vocabulary size:", vocab_size)
+print("Sequence length:", SEQ_LENGTH)
+print("Embedding dimension:", EMBEDDING_DIM)
+print("Hidden dimension:", HIDDEN_DIM)
+print("Batch size:", BATCH_SIZE)
+print("Epochs:", EPOCHS)
+print("\nFinal Training Loss:", train_losses[-1])
+print("Final Validation Loss:", val_losses[-1])
+print("Training Perplexity:", train_perplexity)
+print("Validation Perplexity:", val_perplexity)
+print("\nBest model saved at:")
+print("/kaggle/working/best_char_lstm.pth")
